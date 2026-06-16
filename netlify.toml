@@ -8,3 +8,8 @@
   from = "/playbook-download"
   to = "/playbook-download.html"
   status = 200
+
+[[redirects]]
+  from = "/partners"
+  to = "/homepro_referral_partner.html"
+  status = 200
