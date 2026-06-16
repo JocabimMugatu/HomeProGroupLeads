@@ -1,29 +1,49 @@
 const https = require('https');
 
-function httpsPost(url, data, headers) {
+function post(hostname, path, data, headers) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(data);
-    const options = {
+    const req = https.request({
+      hostname,
+      path,
       method: 'POST',
       headers: {
-        ...headers,
         'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload)
+        'Content-Length': Buffer.byteLength(payload),
+        ...headers
       }
-    };
-    const req = https.request(url, options, (res) => {
+    }, (res) => {
       let body = '';
-      res.on('data', chunk => body += chunk);
-      res.on('end', () => resolve({ status: res.statusCode, body }));
+      res.on('data', c => body += c);
+      res.on('end', () => {
+        console.log(`POST https://${hostname}${path} => ${res.statusCode}: ${body}`);
+        resolve({ status: res.statusCode, body });
+      });
     });
-    req.on('error', reject);
+    req.on('error', (e) => {
+      console.error(`Request error for ${hostname}${path}:`, e.message);
+      reject(e);
+    });
     req.write(payload);
     req.end();
   });
 }
 
 exports.handler = async function(event) {
-  console.log('subscribe function called, method:', event.httpMethod);
+  console.log('Function invoked. Method:', event.httpMethod);
+
+  // Handle CORS preflight
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type'
+      },
+      body: ''
+    };
+  }
 
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method not allowed' };
@@ -32,95 +52,96 @@ exports.handler = async function(event) {
   let name, email;
   try {
     const body = JSON.parse(event.body);
-    name = body.name;
-    email = body.email;
-    console.log('Parsed body - name:', name, 'email:', email);
+    name = (body.name || '').trim();
+    email = (body.email || '').trim();
+    console.log('name:', name, '| email:', email);
   } catch (e) {
-    console.error('JSON parse error:', e.message);
-    return { statusCode: 400, body: 'Bad request' };
+    console.error('Parse error:', e.message);
+    return { statusCode: 400, body: JSON.stringify({ error: 'Bad request' }) };
   }
 
   if (!name || !email) {
-    console.error('Missing name or email');
     return { statusCode: 400, body: JSON.stringify({ error: 'Missing fields' }) };
   }
 
-  // Try both possible env var names
-  const RESEND_API_KEY = process.env.Rsend_API_Key || process.env.RESEND_API_KEY || process.env.rsend_api_key;
-  console.log('API key present:', !!RESEND_API_KEY, 'length:', RESEND_API_KEY ? RESEND_API_KEY.length : 0);
+  // Check all possible env var names
+  const key = process.env.Rsend_API_Key
+           || process.env.RESEND_API_KEY
+           || process.env.RESEND_API_key;
 
-  if (!RESEND_API_KEY) {
-    console.error('No Resend API key found in environment');
-    // Still return 200 so user gets redirected — we just log the failure
-    return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: true, warn: 'no_key' }) };
-  }
+  console.log('Resend key found:', !!key, '| first 8 chars:', key ? key.slice(0,8) : 'NONE');
 
-  const sendEmail = async (to, subject, html) => {
-    console.log('Sending email to:', to);
-    const result = await httpsPost(
-      'https://api.resend.com/emails',
-      { from: 'Home Pro Group Leads <kevin@homeprogroupleads.com>', to: [to], subject, html },
-      { 'Authorization': `Bearer ${RESEND_API_KEY}` }
-    );
-    console.log('Resend response for', to, '- status:', result.status, 'body:', result.body);
-    return result;
-  };
-
-  try {
-    const r1 = await sendEmail(
-      email,
-      'Your First Coast Lead Gen Playbook is here',
-      `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#1a2a3a">
-        <div style="background:#0B1F3A;padding:32px 36px;border-radius:10px 10px 0 0">
-          <p style="font-weight:800;font-size:18px;color:#fff;margin:0">Home Pro <span style="color:#E8A020">· Group Leads</span></p>
-        </div>
-        <div style="background:#F8F7F4;padding:36px;border-radius:0 0 10px 10px">
-          <p style="font-size:16px;margin:0 0 12px">Hey ${name} 👋</p>
-          <p style="font-size:15px;color:#64748B;line-height:1.7;margin:0 0 24px">
-            Thanks for grabbing the First Coast Lead Gen Playbook. Click below to view your copy:
-          </p>
-          <a href="https://effervescent-fudge-47f076.netlify.app/playbook-download"
-             style="display:inline-block;background:#E8A020;color:#0B1F3A;font-weight:700;font-size:15px;padding:14px 28px;border-radius:6px;text-decoration:none;margin-bottom:28px">
-            View &amp; Download the Playbook →
-          </a>
-          <p style="font-size:14px;color:#64748B;line-height:1.7;margin:0 0 24px">
-            Inside you'll find the full First Coast Facebook group map (70+ groups, 200K+ homeowners),
-            the posting strategy that generates exclusive leads, and the 15-minute lead response system.
-          </p>
-          <p style="font-size:14px;color:#64748B;margin:0 0 28px">Any questions — just reply to this email.</p>
-          <hr style="border:none;border-top:1px solid #e2e8f0;margin:0 0 20px">
-          <p style="font-size:12px;color:#94a3b8;margin:0">Home Pro Group Leads · (850) 778-3389 · homeprogroupleads.com</p>
-        </div>
-      </div>`
-    );
-
-    const r2 = await sendEmail(
-      'kevin@homeprogroupleads.com',
-      `New playbook lead: ${name}`,
-      `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px">
-        <h2 style="color:#0B1F3A;margin:0 0 16px">New playbook signup</h2>
-        <p style="margin:0 0 8px"><strong>Name:</strong> ${name}</p>
-        <p style="margin:0 0 8px"><strong>Email:</strong> ${email}</p>
-        <p style="color:#64748b;font-size:13px;margin-top:16px">
-          Submitted ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })} ET
-        </p>
-      </div>`
-    );
-
-    console.log('Both emails attempted. r1 status:', r1.status, 'r2 status:', r2.status);
-
+  if (!key) {
+    console.error('FATAL: No Resend API key in environment. Available vars:', Object.keys(process.env).filter(k => k.toLowerCase().includes('resend') || k.toLowerCase().includes('rsend')));
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ok: true })
-    };
-
-  } catch (err) {
-    console.error('Subscribe error:', err.message, err.stack);
-    return {
-      statusCode: 200, // still 200 so user gets redirected
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ok: true, warn: 'email_error' })
+      body: JSON.stringify({ ok: true, warn: 'no_api_key' })
     };
   }
+
+  const authHeader = { 'Authorization': `Bearer ${key}` };
+
+  // Email to subscriber
+  try {
+    const r1 = await post('api.resend.com', '/emails', {
+      from: 'Kevin at Home Pro Group Leads <kevin@homeprogroupleads.com>',
+      to: [email],
+      reply_to: 'kevin@homeprogroupleads.com',
+      subject: 'Your First Coast Lead Gen Playbook',
+      html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto">
+        <div style="background:#0B1F3A;padding:28px 32px;border-radius:8px 8px 0 0">
+          <p style="font-size:18px;font-weight:800;color:#fff;margin:0">Home Pro <span style="color:#E8A020">· Group Leads</span></p>
+        </div>
+        <div style="background:#F8F7F4;padding:32px;border-radius:0 0 8px 8px;color:#1a2a3a">
+          <p style="font-size:16px;margin:0 0 16px">Hey ${name} 👋</p>
+          <p style="font-size:15px;color:#64748B;line-height:1.7;margin:0 0 24px">
+            Your copy of the First Coast Lead Gen Playbook is ready. Click below to view and download it:
+          </p>
+          <a href="https://effervescent-fudge-47f076.netlify.app/playbook-download"
+             style="display:inline-block;background:#E8A020;color:#0B1F3A;font-weight:700;font-size:15px;padding:14px 28px;border-radius:6px;text-decoration:none;margin-bottom:24px">
+            View &amp; Download the Playbook →
+          </a>
+          <p style="font-size:14px;color:#64748B;line-height:1.7;margin:0 0 16px">
+            Inside: the full First Coast Facebook group map (70+ groups, 200K+ homeowners), the posting strategy, and the 15-minute lead response system.
+          </p>
+          <p style="font-size:14px;color:#64748B;margin:0 0 24px">Questions? Just reply to this email.</p>
+          <hr style="border:none;border-top:1px solid #e2e8f0;margin:0 0 16px">
+          <p style="font-size:12px;color:#94a3b8;margin:0">Home Pro Group Leads · (850) 778-3389 · homeprogroupleads.com</p>
+        </div>
+      </div>`
+    }, authHeader);
+    console.log('Subscriber email status:', r1.status);
+  } catch(e) {
+    console.error('Subscriber email failed:', e.message);
+  }
+
+  // Notification to Kevin
+  try {
+    const r2 = await post('api.resend.com', '/emails', {
+      from: 'Home Pro Group Leads <kevin@homeprogroupleads.com>',
+      to: ['kevin@homeprogroupleads.com'],
+      subject: `New playbook lead: ${name}`,
+      html: `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px">
+        <h2 style="color:#0B1F3A;margin:0 0 20px">New playbook signup</h2>
+        <p style="margin:0 0 10px;font-size:15px"><strong>Name:</strong> ${name}</p>
+        <p style="margin:0 0 10px;font-size:15px"><strong>Email:</strong> ${email}</p>
+        <p style="color:#64748b;font-size:13px;margin-top:16px">
+          ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', dateStyle: 'full', timeStyle: 'short' })} ET
+        </p>
+      </div>`
+    }, authHeader);
+    console.log('Kevin notification status:', r2.status);
+  } catch(e) {
+    console.error('Kevin notification failed:', e.message);
+  }
+
+  return {
+    statusCode: 200,
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    },
+    body: JSON.stringify({ ok: true })
+  };
 };

@@ -643,7 +643,7 @@ footer{background:var(--navy);padding:56px 28px 36px}
       <div class="pb-form reveal-r">
         <h3>Get the playbook</h3>
         <p>Free. No credit card. Delivered immediately.</p>
-        <form onsubmit="submitPb(event)">
+        <form name="playbook-signups" netlify netlify-honeypot="bot-field" onsubmit="submitPb(event)"><input type="hidden" name="form-name" value="playbook-signups"><p hidden><label>Don't fill: <input name="bot-field"></label></p>
           <div class="field"><label>First name</label><input type="text" placeholder="e.g. Kevin" required id="pb-name"></div>
           <div class="field"><label>Email address</label><input type="email" placeholder="you@yourcompany.com" required id="pb-email"></div>
           <button type="submit" class="btn btn-gold pb-btn" id="pb-btn">Send Me the Playbook →</button>
@@ -684,7 +684,7 @@ async function submitPb(e){
   const email=document.getElementById('pb-email').value.trim();
   btn.textContent='Sending…';btn.disabled=true;
   try{
-    const res=await fetch('/api/subscribe',{
+    const res=await fetch('/.netlify/functions/subscribe',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({name,email})
