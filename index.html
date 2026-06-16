@@ -682,6 +682,7 @@ async function submitPb(e){
   const btn=document.getElementById('pb-btn');
   const name=document.getElementById('pb-name').value.trim();
   const email=document.getElementById('pb-email').value.trim();
+  if(!name||!email){return;}
   btn.textContent='Sending…';btn.disabled=true;
   try{
     const res=await fetch('/.netlify/functions/subscribe',{
@@ -689,16 +690,13 @@ async function submitPb(e){
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({name,email})
     });
-    if(res.ok){
-      window.location.href='/playbook-download';
-    } else {
-      btn.textContent='Something went wrong — try again';
-      btn.disabled=false;
-    }
-  } catch {
-    btn.textContent='Something went wrong — try again';
-    btn.disabled=false;
+    const data=await res.json().catch(()=>({}));
+    console.log('Function response:',res.status,data);
+  } catch(err){
+    console.error('Fetch error:',err);
   }
+  // Always redirect regardless of email success
+  window.location.href='/playbook-download';
 }
 function countUp(el,end,sfx=''){const dur=1800,s=performance.now();(function f(n){const p=Math.min((n-s)/dur,1),v=Math.round((1-Math.pow(1-p,3))*end);el.textContent=(end>=1000?v.toLocaleString():v)+sfx;if(p<1)requestAnimationFrame(f)})(s)}
 const so=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){so.unobserve(e.target);countUp(document.getElementById('hs1'),200000,'+');countUp(document.getElementById('hs2'),162,'');countUp(document.getElementById('hs3'),1,'')}})},{threshold:.5})
